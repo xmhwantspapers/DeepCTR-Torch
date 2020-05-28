@@ -131,7 +131,6 @@ class BaseModel(nn.Module):
             shuffle=True,
             use_double=False):
         """
-
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
             dictionary mapping input names to Numpy arrays.
         :param y: Numpy array of target (label) data (if the model has a single output), or list of Numpy arrays (if the model has multiple outputs).
@@ -194,6 +193,7 @@ class BaseModel(nn.Module):
         model = self.train()
         loss_func = self.loss_func
         optim = self.optim
+        optim_s = self.optim_s
 
         sample_num = len(train_tensor_data)
         steps_per_epoch = (sample_num - 1) // batch_size + 1
@@ -215,6 +215,8 @@ class BaseModel(nn.Module):
                         y_pred = model(x).squeeze()
 
                         optim.zero_grad()
+                        if optim_s is not None:
+                            optim_s.zero_grad()
                         loss = loss_func(y_pred, y.squeeze(), reduction='sum')
 
                         total_loss = loss + self.reg_loss + self.aux_loss
@@ -223,6 +225,8 @@ class BaseModel(nn.Module):
                         total_loss_epoch += total_loss.item()
                         total_loss.backward(retain_graph=True)
                         optim.step()
+                        if optim_s is not None:
+                            optim_s.step()
 
                         if verbose > 0:
                             for name, metric_fun in self.metrics.items():
@@ -370,6 +374,7 @@ class BaseModel(nn.Module):
     def compile(self, optimizer,
                 loss=None,
                 metrics=None,
+                optimizer_sparse=None,
                 ):
         """
         :param optimizer: String (name of optimizer) or optimizer instance. See [optimizers](https://pytorch.org/docs/stable/optim.html).
@@ -377,25 +382,67 @@ class BaseModel(nn.Module):
         :param metrics: List of metrics to be evaluated by the model during training and testing. Typically you will use `metrics=['accuracy']`.
         """
 
-        self.optim = self._get_optim(optimizer)
+        self.optim, self.optim_s = self._get_optim(optimizer, optimizer_sparse)
         self.loss_func = self._get_loss_func(loss)
         self.metrics = self._get_metrics(metrics)
 
-    def _get_optim(self, optimizer):
-        if isinstance(optimizer, str):
-            if optimizer == "sgd":
-                optim = torch.optim.SGD(self.parameters(), lr=0.01)
-            elif optimizer == "adam":
-                optim = torch.optim.Adam(self.parameters())  # 0.001
-            elif optimizer == "adagrad":
-                optim = torch.optim.Adagrad(self.parameters())  # 0.01
-            elif optimizer == "rmsprop":
-                optim = torch.optim.RMSprop(self.parameters())
+    def _get_optim(self, optimizer, optimizer_sparse):
+        optim_s = None
+        if optimizer_sparse is None:
+            if isinstance(optimizer, str):
+                if optimizer == "sgd":
+                    optim = torch.optim.SGD(self.parameters(), lr=0.01)
+                elif optimizer == "adam":
+                    optim = torch.optim.Adam(self.parameters())  # 0.001
+                elif optimizer == "adagrad":
+                    optim = torch.optim.Adagrad(self.parameters())  # 0.01
+                elif optimizer == "rmsprop":
+                    optim = torch.optim.RMSprop(self.parameters())
+                else:
+                    raise NotImplementedError
             else:
-                raise NotImplementedError
+                optim = optimizer
         else:
-            optim = optimizer
-        return optim
+            def sparse_parameters(named_gen):
+                for name, item in named_gen:
+                    if 'embed' in name:
+                        print(name)
+                        yield item
+
+            def dense_parameters(named_gen):
+                for name, item in named_gen:
+                    if 'embed' not in name:
+                        print(name)
+                        yield item
+            
+            if isinstance(optimizer, str):
+                if optimizer == "sgd":
+                    optim = torch.optim.SGD(dense_parameters(self.named_parameters()), lr=0.01)
+                elif optimizer == "adam":
+                    optim = torch.optim.Adam(dense_parameters(self.named_parameters()))  # 0.001
+                elif optimizer == "adagrad":
+                    optim = torch.optim.Adagrad(dense_parameters(self.named_parameters()))  # 0.01
+                elif optimizer == "rmsprop":
+                    optim = torch.optim.RMSprop(dense_parameters(self.named_parameters()))
+                else:
+                    raise NotImplementedError
+            else:
+                optim = optimizer
+            if isinstance(optimizer_sparse, str):
+                if optimizer == "sgd":
+                    optim_s = torch.optim.SGD(sparse_parameters(self.named_parameters()), lr=0.01)
+                elif optimizer == "adam":
+                    optim_s = torch.optim.Adam(sparse_parameters(self.named_parameters()))  # 0.001
+                elif optimizer == "adagrad":
+                    optim_s = torch.optim.Adagrad(sparse_parameters(self.named_parameters()))  # 0.01
+                elif optimizer == "rmsprop":
+                    optim_s = torch.optim.RMSprop(sparse_parameters(self.named_parameters()))
+                else:
+                    raise NotImplementedError
+            else:
+                optim_s = optimizer_sparse
+                
+        return optim, optim_s
 
     def _get_loss_func(self, loss):
         if isinstance(loss, str):
