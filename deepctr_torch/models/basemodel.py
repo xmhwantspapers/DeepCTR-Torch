@@ -86,7 +86,8 @@ class Linear(nn.Module):
 
 class BaseModel(nn.Module):
     def __init__(self,
-                 linear_feature_columns, dnn_feature_columns, dnn_hidden_units=(128, 128),
+                 linear_feature_columns, dnn_feature_columns, dnn_hidden_units=(
+                     128, 128),
                  l2_reg_linear=1e-5,
                  l2_reg_embedding=1e-5, l2_reg_dnn=0, init_std=0.0001, seed=1024, dnn_dropout=0, dnn_activation='relu',
                  task='binary', device='cpu'):
@@ -103,7 +104,8 @@ class BaseModel(nn.Module):
             linear_feature_columns + dnn_feature_columns)
         self.dnn_feature_columns = dnn_feature_columns
 
-        self.embedding_dict = create_embedding_matrix(dnn_feature_columns, init_std, sparse=False, device=device)
+        self.embedding_dict = create_embedding_matrix(
+            dnn_feature_columns, init_std, sparse=False, device=device)
         #         nn.ModuleDict(
         #             {feat.embedding_name: nn.Embedding(feat.dimension, embedding_size, sparse=True) for feat in
         #              self.dnn_feature_columns}
@@ -129,7 +131,9 @@ class BaseModel(nn.Module):
             validation_split=0.,
             validation_data=None,
             shuffle=True,
-            use_double=False):
+            use_double=False,
+            model_name="xmh_test",
+            verbose_steps = 500):
         """
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
             dictionary mapping input names to Numpy arrays.
@@ -189,6 +193,14 @@ class BaseModel(nn.Module):
         train_loader = DataLoader(
             dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
 
+        from torch.utils.tensorboard import SummaryWriter
+
+        filename = model_name+"-Dense" + \
+            str(self.optim)+"Sparse"+str(self.optim_s)
+        import re
+        filename = re.sub(r'[^a-z.A-Z0-9]+', '+', filename)
+        writer = SummaryWriter("logs/"+filename)
+
         print(self.device, end="\n")
         model = self.train()
         loss_func = self.loss_func
@@ -223,7 +235,8 @@ class BaseModel(nn.Module):
 
                         loss_epoch += loss.item()
                         total_loss_epoch += total_loss.item()
-                        total_loss.backward(retain_graph=True)
+                        # total_loss.backward(retain_graph=True)
+                        loss.backward(retain_graph=True)
                         optim.step()
                         if optim_s is not None:
                             optim_s.step()
@@ -236,9 +249,33 @@ class BaseModel(nn.Module):
                                 if use_double:
                                     train_result[name].append(metric_fun(
                                         y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
+                                    raise NotImplementedError("xmh panic")
                                 else:
-                                    train_result[name].append(metric_fun(
-                                        y.cpu().data.numpy(), y_pred.cpu().data.numpy()))
+                                    temp = metric_fun(
+                                        y.cpu().data.numpy(), y_pred.cpu().data.numpy())
+                                    train_result[name].append(temp)
+
+                        if verbose > 0 and index % verbose_steps == (verbose_steps-1):
+                            eval_str = "[Iter{0}] - loss: {1: .4f}".format(
+                                index, total_loss_epoch / ((index+1) * batch_size))
+
+                            for name, result in train_result.items():
+                                eval_str += " - " + name + \
+                                            ": {0: .4f}".format(
+                                                np.sum(result) / (index+1))
+                                writer.add_scalar(
+                                    '{0}/train'.format(name), np.sum(result) / (index+1), index+steps_per_epoch*epoch)
+
+                            if len(val_x) and len(val_y):
+                                eval_result = self.evaluate(
+                                    val_x, val_y, batch_size)
+
+                                for name, result in eval_result.items():
+                                    eval_str += " - val_" + name + \
+                                                ": {0: .4f}".format(result)
+                                    writer.add_scalar(
+                                        '{0}/val'.format(name), result, index+steps_per_epoch*epoch)
+                            print(eval_str)
 
             except KeyboardInterrupt:
                 t.close()
@@ -254,7 +291,8 @@ class BaseModel(nn.Module):
 
                 for name, result in train_result.items():
                     eval_str += " - " + name + \
-                                ": {0: .4f}".format(np.sum(result) / steps_per_epoch)
+                                ": {0: .4f}".format(
+                                    np.sum(result) / steps_per_epoch)
 
                 if len(val_x) and len(val_y):
                     eval_result = self.evaluate(val_x, val_y, batch_size)
@@ -263,6 +301,7 @@ class BaseModel(nn.Module):
                         eval_str += " - val_" + name + \
                                     ": {0: .4f}".format(result)
                 print(eval_str)
+        writer.close()
 
     def evaluate(self, x, y, batch_size=256):
         """
@@ -349,7 +388,8 @@ class BaseModel(nn.Module):
         if feature_group:
             sparse_input_dim = len(sparse_feature_columns)
         else:
-            sparse_input_dim = sum(feat.embedding_dim for feat in sparse_feature_columns)
+            sparse_input_dim = sum(
+                feat.embedding_dim for feat in sparse_feature_columns)
         input_dim = 0
         if include_sparse:
             input_dim += sparse_input_dim
@@ -375,6 +415,8 @@ class BaseModel(nn.Module):
                 loss=None,
                 metrics=None,
                 optimizer_sparse=None,
+                optimizer_dense_lr=0.001,
+                optimizer_sparse_lr=0.001,
                 ):
         """
         :param optimizer: String (name of optimizer) or optimizer instance. See [optimizers](https://pytorch.org/docs/stable/optim.html).
@@ -382,11 +424,13 @@ class BaseModel(nn.Module):
         :param metrics: List of metrics to be evaluated by the model during training and testing. Typically you will use `metrics=['accuracy']`.
         """
 
-        self.optim, self.optim_s = self._get_optim(optimizer, optimizer_sparse)
+        self.optim, self.optim_s = self._get_optim(
+            optimizer, optimizer_sparse, optimizer_dense_lr, optimizer_sparse_lr)
         self.loss_func = self._get_loss_func(loss)
         self.metrics = self._get_metrics(metrics)
 
-    def _get_optim(self, optimizer, optimizer_sparse):
+    def _get_optim(self, optimizer, optimizer_sparse, optimizer_dense_lr,
+                   optimizer_sparse_lr):
         optim_s = None
         if optimizer_sparse is None:
             if isinstance(optimizer, str):
@@ -414,34 +458,42 @@ class BaseModel(nn.Module):
                     if 'embed' not in name:
                         print(name)
                         yield item
-            
+
             if isinstance(optimizer, str):
                 if optimizer == "sgd":
-                    optim = torch.optim.SGD(dense_parameters(self.named_parameters()), lr=0.01)
+                    optim = torch.optim.SGD(dense_parameters(
+                        self.named_parameters()), lr=optimizer_dense_lr)
                 elif optimizer == "adam":
-                    optim = torch.optim.Adam(dense_parameters(self.named_parameters()))  # 0.001
+                    optim = torch.optim.Adam(dense_parameters(
+                        self.named_parameters()), lr=optimizer_dense_lr)  # 0.001
                 elif optimizer == "adagrad":
-                    optim = torch.optim.Adagrad(dense_parameters(self.named_parameters()))  # 0.01
+                    optim = torch.optim.Adagrad(
+                        dense_parameters(self.named_parameters()), lr=optimizer_dense_lr)  # 0.01
                 elif optimizer == "rmsprop":
-                    optim = torch.optim.RMSprop(dense_parameters(self.named_parameters()))
+                    optim = torch.optim.RMSprop(
+                        dense_parameters(self.named_parameters()), lr=optimizer_dense_lr)
                 else:
                     raise NotImplementedError
             else:
                 optim = optimizer
             if isinstance(optimizer_sparse, str):
                 if optimizer == "sgd":
-                    optim_s = torch.optim.SGD(sparse_parameters(self.named_parameters()), lr=0.01)
+                    optim_s = torch.optim.SGD(sparse_parameters(
+                        self.named_parameters()), lr=optimizer_sparse_lr)
                 elif optimizer == "adam":
-                    optim_s = torch.optim.Adam(sparse_parameters(self.named_parameters()))  # 0.001
+                    optim_s = torch.optim.Adam(sparse_parameters(
+                        self.named_parameters()), lr=optimizer_sparse_lr)  # 0.001
                 elif optimizer == "adagrad":
-                    optim_s = torch.optim.Adagrad(sparse_parameters(self.named_parameters()))  # 0.01
+                    optim_s = torch.optim.Adagrad(
+                        sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)  # 0.01
                 elif optimizer == "rmsprop":
-                    optim_s = torch.optim.RMSprop(sparse_parameters(self.named_parameters()))
+                    optim_s = torch.optim.RMSprop(
+                        sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)
                 else:
                     raise NotImplementedError
             else:
                 optim_s = optimizer_sparse
-                
+
         return optim, optim_s
 
     def _get_loss_func(self, loss):
@@ -471,6 +523,7 @@ class BaseModel(nn.Module):
         metrics_ = {}
         if metrics:
             for metric in metrics:
+                metric = metric.lower()
                 if metric == "binary_crossentropy" or metric == "logloss":
                     if set_eps:
                         metrics_[metric] = self._log_loss
@@ -491,7 +544,9 @@ class BaseModel(nn.Module):
         sparse_feature_columns = list(
             filter(lambda x: isinstance(x, (SparseFeat, VarLenSparseFeat)), feature_columns)) if len(
             feature_columns) else []
-        embedding_size_set = set([feat.embedding_dim for feat in sparse_feature_columns])
+        embedding_size_set = set(
+            [feat.embedding_dim for feat in sparse_feature_columns])
         if len(embedding_size_set) > 1:
-            raise ValueError("embedding_dim of SparseFeat and VarlenSparseFeat must be same in this model!")
+            raise ValueError(
+                "embedding_dim of SparseFeat and VarlenSparseFeat must be same in this model!")
         return list(embedding_size_set)[0]
