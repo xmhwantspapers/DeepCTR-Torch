@@ -477,16 +477,16 @@ class BaseModel(nn.Module):
             else:
                 optim = optimizer
             if isinstance(optimizer_sparse, str):
-                if optimizer == "sgd":
+                if optimizer_sparse == "sgd":
                     optim_s = torch.optim.SGD(sparse_parameters(
                         self.named_parameters()), lr=optimizer_sparse_lr)
-                elif optimizer == "adam":
+                elif optimizer_sparse == "adam":
                     optim_s = torch.optim.Adam(sparse_parameters(
                         self.named_parameters()), lr=optimizer_sparse_lr)  # 0.001
-                elif optimizer == "adagrad":
+                elif optimizer_sparse == "adagrad":
                     optim_s = torch.optim.Adagrad(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)  # 0.01
-                elif optimizer == "rmsprop":
+                elif optimizer_sparse == "rmsprop":
                     optim_s = torch.optim.RMSprop(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)
                 else:
