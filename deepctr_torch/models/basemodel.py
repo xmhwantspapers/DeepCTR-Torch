@@ -450,13 +450,11 @@ class BaseModel(nn.Module):
             def sparse_parameters(named_gen):
                 for name, item in named_gen:
                     if 'embed' in name:
-                        print(name)
                         yield item
 
             def dense_parameters(named_gen):
                 for name, item in named_gen:
                     if 'embed' not in name:
-                        print(name)
                         yield item
 
             if isinstance(optimizer, str):
