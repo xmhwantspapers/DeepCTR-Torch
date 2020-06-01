@@ -427,7 +427,7 @@ class BaseModel(nn.Module):
         self.optim, self.optim_s = self._get_optim(
             optimizer, optimizer_sparse, optimizer_dense_lr, optimizer_sparse_lr)
         self.loss_func = self._get_loss_func(loss)
-        self.metrics = self._get_metrics(metrics, True)
+        self.metrics = self._get_metrics(metrics, False)
 
     def _get_optim(self, optimizer, optimizer_sparse, optimizer_dense_lr,
                    optimizer_sparse_lr):
@@ -435,13 +435,13 @@ class BaseModel(nn.Module):
         if optimizer_sparse is None:
             if isinstance(optimizer, str):
                 if optimizer == "sgd":
-                    optim = torch.optim.SGD(self.parameters(), lr=0.01)
+                    optim = torch.optim.SGD(self.parameters(), lr=optimizer_dense_lr)
                 elif optimizer == "adam":
-                    optim = torch.optim.Adam(self.parameters())  # 0.001
+                    optim = torch.optim.Adam(self.parameters(), lr=optimizer_dense_lr)  # 0.001
                 elif optimizer == "adagrad":
-                    optim = torch.optim.Adagrad(self.parameters())  # 0.01
+                    optim = torch.optim.Adagrad(self.parameters(), lr=optimizer_dense_lr)  # 0.01
                 elif optimizer == "rmsprop":
-                    optim = torch.optim.RMSprop(self.parameters())
+                    optim = torch.optim.RMSprop(self.parameters(), lr=optimizer_dense_lr)
                 else:
                     raise NotImplementedError
             else:
