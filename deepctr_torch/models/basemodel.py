@@ -224,19 +224,19 @@ class BaseModel(nn.Module):
                         x = x_train.to(self.device).float()
                         y = y_train.to(self.device).float()
 
-                        y_pred = model(x).squeeze()
 
                         optim.zero_grad()
                         if optim_s is not None:
                             optim_s.zero_grad()
+                        y_pred = model(x).squeeze()
+
                         loss = loss_func(y_pred, y.squeeze(), reduction='sum')
 
                         total_loss = loss + self.reg_loss + self.aux_loss
 
                         loss_epoch += loss.item()
                         total_loss_epoch += total_loss.item()
-                        # total_loss.backward(retain_graph=True)
-                        loss.backward(retain_graph=True)
+                        total_loss.backward(retain_graph=True)
                         optim.step()
                         if optim_s is not None:
                             optim_s.step()
@@ -427,7 +427,7 @@ class BaseModel(nn.Module):
         self.optim, self.optim_s = self._get_optim(
             optimizer, optimizer_sparse, optimizer_dense_lr, optimizer_sparse_lr)
         self.loss_func = self._get_loss_func(loss)
-        self.metrics = self._get_metrics(metrics)
+        self.metrics = self._get_metrics(metrics, True)
 
     def _get_optim(self, optimizer, optimizer_sparse, optimizer_dense_lr,
                    optimizer_sparse_lr):
