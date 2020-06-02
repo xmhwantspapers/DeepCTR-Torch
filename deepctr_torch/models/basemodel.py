@@ -133,7 +133,8 @@ class BaseModel(nn.Module):
             shuffle=True,
             use_double=False,
             model_name="xmh_test",
-            verbose_steps = 500):
+            verbose_steps=500,
+            xmh_model_dir=""):
         """
         :param x: Numpy array of training data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).If input layers in the model are named, you can also pass a
             dictionary mapping input names to Numpy arrays.
@@ -191,15 +192,13 @@ class BaseModel(nn.Module):
         if batch_size is None:
             batch_size = 256
         train_loader = DataLoader(
-            dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
+            dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size, num_workers = 8, pin_memory = True)
 
         from torch.utils.tensorboard import SummaryWriter
 
-        filename = model_name+"-Dense" + \
-            str(self.optim)+"Sparse"+str(self.optim_s)
         import re
-        filename = re.sub(r'[^a-z.A-Z0-9]+', '+', filename)
-        writer = SummaryWriter("logs/"+filename)
+        import datetime
+        writer = SummaryWriter(xmh_model_dir)
 
         print(self.device, end="\n")
         model = self.train()
@@ -221,8 +220,8 @@ class BaseModel(nn.Module):
             try:
                 with tqdm(enumerate(train_loader), disable=verbose != 1) as t:
                     for index, (x_train, y_train) in t:
-                        x = x_train.to(self.device).float()
-                        y = y_train.to(self.device).float()
+                        x = x_train.to(self.device, non_blocking=True).float()
+                        y = y_train.to(self.device, non_blocking=True).float()
 
                         optim.zero_grad()
                         if optim_s is not None:
@@ -249,7 +248,6 @@ class BaseModel(nn.Module):
                                 if use_double:
                                     train_result[name].append(metric_fun(
                                         y.cpu().data.numpy(), y_pred.cpu().data.numpy().astype("float64")))
-                                    raise NotImplementedError("xmh panic")
                                 else:
                                     temp = metric_fun(
                                         y.cpu().data.numpy(), y_pred.cpu().data.numpy())
@@ -268,7 +266,11 @@ class BaseModel(nn.Module):
 
                             if len(val_x) and len(val_y):
                                 eval_result = self.evaluate(
-                                    val_x, val_y, batch_size)
+                                    val_x, val_y, 20480)
+                                if eval_result['auc'] < 0.6:
+                                    print("something failed")
+                                    break
+
 
                                 for name, result in eval_result.items():
                                     eval_str += " - val_" + name + \
@@ -303,7 +305,7 @@ class BaseModel(nn.Module):
                 print(eval_str)
         writer.close()
 
-    def evaluate(self, x, y, batch_size=256):
+    def evaluate(self, x, y, batch_size=20480):
         """
 
         :param x: Numpy array of test data (if the model has a single input), or list of Numpy arrays (if the model has multiple inputs).
@@ -317,7 +319,7 @@ class BaseModel(nn.Module):
             eval_result[name] = metric_fun(y, pred_ans)
         return eval_result
 
-    def predict(self, x, batch_size=256, use_double=False):
+    def predict(self, x, batch_size=256, use_double=True):
         """
 
         :param x: The input data, as a Numpy array (or list of Numpy arrays if the model has multiple inputs).
@@ -334,12 +336,12 @@ class BaseModel(nn.Module):
         tensor_data = Data.TensorDataset(
             torch.from_numpy(np.concatenate(x, axis=-1)))
         test_loader = DataLoader(
-            dataset=tensor_data, shuffle=False, batch_size=batch_size)
+            dataset=tensor_data, shuffle=False, batch_size=batch_size, num_workers = 40, pin_memory = True)
 
         pred_ans = []
         with torch.no_grad():
             for index, x_test in enumerate(test_loader):
-                x = x_test[0].to(self.device).float()
+                x = x_test[0].to(self.device, non_blocking=True).float()
                 # y = y_test.to(self.device).float()
 
                 y_pred = model(x).cpu().data.numpy()  # .squeeze()
@@ -435,13 +437,17 @@ class BaseModel(nn.Module):
         if optimizer_sparse is None:
             if isinstance(optimizer, str):
                 if optimizer == "sgd":
-                    optim = torch.optim.SGD(self.parameters(), lr=optimizer_dense_lr)
+                    optim = torch.optim.SGD(
+                        self.parameters(), lr=optimizer_dense_lr)
                 elif optimizer == "adam":
-                    optim = torch.optim.Adam(self.parameters(), lr=optimizer_dense_lr)  # 0.001
+                    optim = torch.optim.Adam(
+                        self.parameters(), lr=optimizer_dense_lr)  # 0.001
                 elif optimizer == "adagrad":
-                    optim = torch.optim.Adagrad(self.parameters(), lr=optimizer_dense_lr)  # 0.01
+                    optim = torch.optim.Adagrad(
+                        self.parameters(), lr=optimizer_dense_lr)  # 0.01
                 elif optimizer == "rmsprop":
-                    optim = torch.optim.RMSprop(self.parameters(), lr=optimizer_dense_lr)
+                    optim = torch.optim.RMSprop(
+                        self.parameters(), lr=optimizer_dense_lr)
                 else:
                     raise NotImplementedError
             else:
@@ -484,7 +490,7 @@ class BaseModel(nn.Module):
                 elif optimizer_sparse == "adagrad":
                     optim_s = torch.optim.Adagrad(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)  # 0.01
-                elif optimizer_sparse == "rmsprop":
+                elif optimizer_sparse == "rrms":
                     optim_s = torch.optim.RMSprop(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)
                 else:
