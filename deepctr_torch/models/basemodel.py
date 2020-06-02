@@ -131,7 +131,7 @@ class BaseModel(nn.Module):
             validation_split=0.,
             validation_data=None,
             shuffle=True,
-            use_double=False,
+            use_double=True,
             model_name="xmh_test",
             verbose_steps=500,
             xmh_model_dir=""):
@@ -491,7 +491,7 @@ class BaseModel(nn.Module):
                     optim_s = torch.optim.Adagrad(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)  # 0.01
                 elif optimizer_sparse == "rrms":
-                    optim_s = torch.optim.RMSprop(
+                    optim_s = torch.optim.RRMSprop(
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)
                 else:
                     raise NotImplementedError
