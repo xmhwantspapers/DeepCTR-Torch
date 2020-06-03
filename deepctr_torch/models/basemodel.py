@@ -192,7 +192,7 @@ class BaseModel(nn.Module):
         if batch_size is None:
             batch_size = 256
         train_loader = DataLoader(
-            dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size, num_workers = 8, pin_memory = True)
+            dataset=train_tensor_data, shuffle=shuffle, batch_size=batch_size)
 
         from torch.utils.tensorboard import SummaryWriter
 
@@ -207,6 +207,8 @@ class BaseModel(nn.Module):
         optim_s = self.optim_s
 
         sample_num = len(train_tensor_data)
+        best_val_auc= 0
+        verboses_no_improve  = 0
         steps_per_epoch = (sample_num - 1) // batch_size + 1
 
         print("Train on {0} samples, validate on {1} samples, {2} steps per epoch".format(
@@ -220,8 +222,8 @@ class BaseModel(nn.Module):
             try:
                 with tqdm(enumerate(train_loader), disable=verbose != 1) as t:
                     for index, (x_train, y_train) in t:
-                        x = x_train.to(self.device, non_blocking=True).float()
-                        y = y_train.to(self.device, non_blocking=True).float()
+                        x = x_train.to(self.device).float()
+                        y = y_train.to(self.device).float()
 
                         optim.zero_grad()
                         if optim_s is not None:
@@ -270,6 +272,14 @@ class BaseModel(nn.Module):
                                 if eval_result['auc'] < 0.6:
                                     print("something failed")
                                     break
+                                if eval_result['auc'] > best_val_auc:
+                                    best_val_auc = eval_result['auc']
+                                    verboses_no_improve = 0
+                                else:
+                                    verboses_no_improve += 1
+                                    if verboses_no_improve == 5:
+                                        print("early stop")
+                                        break
 
 
                                 for name, result in eval_result.items():
@@ -336,12 +346,12 @@ class BaseModel(nn.Module):
         tensor_data = Data.TensorDataset(
             torch.from_numpy(np.concatenate(x, axis=-1)))
         test_loader = DataLoader(
-            dataset=tensor_data, shuffle=False, batch_size=batch_size, num_workers = 40, pin_memory = True)
+            dataset=tensor_data, shuffle=False, batch_size=batch_size)
 
         pred_ans = []
         with torch.no_grad():
             for index, x_test in enumerate(test_loader):
-                x = x_test[0].to(self.device, non_blocking=True).float()
+                x = x_test[0].to(self.device).float()
                 # y = y_test.to(self.device).float()
 
                 y_pred = model(x).cpu().data.numpy()  # .squeeze()
@@ -492,7 +502,7 @@ class BaseModel(nn.Module):
                         sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)  # 0.01
                 elif optimizer_sparse == "rrms":
                     optim_s = torch.optim.RRMSprop(
-                        sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr)
+                        sparse_parameters(self.named_parameters()), lr=optimizer_sparse_lr, alpha = 0.9999)
                 else:
                     raise NotImplementedError
             else:
